@@ -1,0 +1,158 @@
+##
+## Base builder image
+##
+FROM debian:stable-slim AS builder
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN echo "APT::Install-Recommends "0" ; APT::Install-Suggests "0" ;" > /etc/apt/apt.conf.d/default \
+    && apt-get update  \
+    && apt-get install apt-utils \
+    && apt-get upgrade -y \
+    && apt-get install -y curl gnupg wget lsb-release ca-certificates file 
+
+##
+## Terraform builder image
+##
+FROM builder AS terraform-builder
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG TERRAFORM_VERSION="1.9.1"
+RUN curl -fsSL https://get.opentofu.org/opentofu.gpg | tee /etc/apt/keyrings/opentofu.gpg >/dev/null  \
+    && curl -fsSL https://packages.opentofu.org/opentofu/tofu/gpgkey | gpg --no-tty --batch --dearmor -o /etc/apt/keyrings/opentofu-repo.gpg >/dev/null \
+    && chmod a+r /etc/apt/keyrings/opentofu.gpg /etc/apt/keyrings/opentofu-repo.gpg \
+    && echo \
+        "deb [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] https://packages.opentofu.org/opentofu/tofu/any/ any main \
+        deb-src [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] https://packages.opentofu.org/opentofu/tofu/any/ any main" | \
+        tee /etc/apt/sources.list.d/opentofu.list > /dev/null \
+    && chmod a+r /etc/apt/sources.list.d/opentofu.list \
+    && apt-get update  \
+    && apt-get install -y tofu=$TERRAFORM_VERSION 
+
+##
+## Terraspace builder image
+##
+FROM builder AS terraspace-builder
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG TERRASPACE_VERSION="2.2.15-1"
+RUN curl -sL https://apt.boltops.com/boltops-key.public | gpg -o /usr/share/keyrings/terraspace-archive-keyring.gpg --dearmor \
+    && echo "deb [signed-by=/usr/share/keyrings/terraspace-archive-keyring.gpg] https://apt.boltops.com stable main" | tee /etc/apt/sources.list.d/terraspace.list \
+    && apt-get update  \
+    && apt-get install -y terraspace=$TERRASPACE_VERSION \
+    && cd /tmp \
+    #&& terraspace new project init --plugin azurerm --no-examples \ 
+    && rm -rf /tmp/*
+
+##
+## Azure CLI builder image
+##
+FROM builder AS azcli-builder
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg -o /usr/share/keyrings/microsoft-archive-keyring.gpg --dearmor \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-archive-keyring.gpg] https://packages.microsoft.com/repos/azure-cli/ $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/azure-cli.list \  
+    && apt-get update  \
+    && apt-get install -y azure-cli
+
+# ##
+# ## Google Authenticator PAM module builder image
+# ##
+# FROM builder as google-authenticator-libpam-builder
+
+# ARG DEBIAN_FRONTEND=noninteractive
+# RUN apt-get update  \
+#     && apt-get install -y libpam-google-authenticator
+
+##
+## Prep image
+##
+FROM debian:stable-slim AS prepimage
+
+LABEL maintainer="gerberflorian@hotmail.de"
+
+## Install Terraform
+COPY --from=terraform-builder /usr/bin/tofu /usr/local/bin/tofu
+
+## Install Terraspace
+COPY --from=terraspace-builder /usr/local/bin/terraspace* /usr/local/bin/bundle /usr/local/bin/rspec /usr/local/bin/ruby /usr/local/bin/
+COPY --from=terraspace-builder /opt/terraspace /opt/terraspace
+
+# ## Install Azure CLI
+# COPY --from=azcli-builder /usr/bin/az /usr/bin/az
+# COPY --from=azcli-builder /opt/az /opt/az
+
+# ## Install Google Authenticator PAM module
+# COPY --from=google-authenticator-libpam-builder /usr/bin/google-authenticator /usr/bin/google-authenticator
+# COPY --from=google-authenticator-libpam-builder /lib/x86_64-linux-gnu/security/pam_google_authenticator.* /lib/x86_64-linux-gnu/security/
+# COPY --from=google-authenticator-libpam-builder /usr/lib/x86_64-linux-gnu/libqrencode.so.4.1.1 /usr/lib/x86_64-linux-gnu/libqrencode.so.4.1.1
+
+ENV LANG="C.UTF-8" \
+    TIMEZONE="Etc/UTC" \
+    TERM="xterm" \
+    HOSTNAME="bastion" 
+    # MFA_PROVIDER="google-authenticator" \
+    # ENFORCER_ENABLED="true" \
+    # ENFORCER_CLEAN_HOME_ENABLED="true" \
+    # RATE_LIMIT_ENABLED="true" \
+    # RATE_LIMIT_MAX_FAILURES="5" \
+    # RATE_LIMIT_LOCKOUT_TIME="300" \
+    # RATE_LIMIT_FAIL_DELAY="3000000"
+
+## Install dependencies
+RUN echo "APT::Install-Recommends "0" ; APT::Install-Suggests "0" ;" > /etc/apt/apt.conf.d/default \
+    # && apt-get update  \
+    # && apt-get install apt-utils \
+    # && apt-get upgrade -y \
+    # && apt-get install -y sudo netcat-openbsd openssh-server git rsyslog nfs-common \
+    # && apt-get remove -y lsb-release wget apt-utils \
+    && apt-get autoremove --purge -y \
+    && apt-get clean -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /etc/ssh/ssh_host_*_key*  \
+    && rm -f /usr/bin/ssh-agent \
+    && rm -f /usr/bin/ssh-keyscan 
+    # && echo "auth required pam_google_authenticator.so nullok" >> /etc/pam.d/sshd \
+    # && echo "auth required pam_permit.so" >> /etc/pam.d/sshd \
+    # && sed -e '/@include common-auth/ s/^#*/#/' -i /etc/pam.d/sshd 
+
+##
+## Bastion image
+##
+
+FROM prepimage
+
+COPY ./config /
+COPY init.sh /usr/local/bin
+# COPY ./users/authorized_keys /tmp/
+
+RUN useradd -D -s /bin/bash \
+    # && setsebool -P use_nfs_home_dirs 1 \
+    && chmod +x /usr/local/bin/init.sh \
+    && chmod +x /etc/init.d/custom/* \
+    && chmod +x /etc/profile.d/* \
+    # && chmod +x /etc/enforce.d/* \
+    && chmod +x /etc/fc.d/* \
+    && chmod +x /usr/bin/*
+
+
+# RUN chmod u+x /usr/local/bin/init.sh \
+#     && echo "#%PAM-1.0" > /etc/pam.d/mfa \  
+#     && echo "auth include google-authenticator" >> /etc/pam.d/mfa \
+#     && echo "${HOSTNAME}" > /etc/hostname \
+#     && hostname -F /etc/hostname >/dev/null 2>&1 || true \
+#     && ln -sf /usr/bin/setup-google-authenticator /etc/fc.d/0.setup-google-authenticator \
+#     && echo "- Locking down /proc" \
+#     && chmod 700 /proc \
+#     && ([ -f /etc/ssh/ssh_host_rsa_key ] || ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N "") \
+#     && ([ -f /etc/ssh/ssh_host_ed25519_key ] || ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N "") \
+#     && chmod +x /etc/init.d/custom/usercreation \
+#     && chmod +x /usr/bin/fc \
+#     && /etc/init.d/custom/usercreation \
+#     && echo "Done" 
+
+
+# RUN useradd -m nimda 
+
+# USER root
+
+ENTRYPOINT ["init.sh"]

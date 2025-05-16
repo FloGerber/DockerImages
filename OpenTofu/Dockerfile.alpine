@@ -1,0 +1,13 @@
+FROM ruby:3.0.3-alpine3.15
+
+COPY ./system/usr/local /usr/local
+COPY ./system/root/ /root/
+COPY bin/install/terraspace/gem.sh bin/install/terraspace/gem.sh
+ARG PACKAGE_VERSION=latest
+
+RUN apk add --no-cache curl ruby-unf_ext cmake build-base git aws-cli \
+    && curl --proto '=https' --tlsv1.2 -fsSL https://get.opentofu.org/install-opentofu.sh -o install-opentofu.sh \
+    && chmod +x install-opentofu.sh \
+    && ./install-opentofu.sh --install-method apk \
+    && rm -f install-opentofu.sh \
+    && sudo bin/install/terraspace/gem.sh

@@ -1,0 +1,32 @@
+#!/bin/bash
+
+until [ -f "${HOME}/.google_authenticator" ]; do
+  if ! [[ -t 1 ]] || [[ "$SSH_ORIGINAL_COMMAND" =~ ^(rsync|nc|scp) ]]; then
+    echo "MFA setup required"
+    exit 1
+  else
+    echo -e "\nWelcome $USER. Please follow the prompts to setup your MFA device and change the Default Password"
+    umask 0066
+
+    google-authenticator -t -d -f -W -R 30 -r 3
+    
+    echo "Please Change the Default Password"
+    passwd
+    
+    # google-authenticator
+    if [ $? -ne 0 ]; then
+      echo "MFA setup failed"
+      exit 1;
+    fi
+
+    if [ -f "${HOME}/.google_authenticator" ]; then
+      chmod 600 "${HOME}/.google_authenticator"
+      cp "${HOME}/.google_authenticator" /mnt/userdata/$USER/
+      echo "MFA enabled for $USER"
+    else
+      echo "MFA setup is mandatory"
+    fi
+  fi
+done
+
+trap - SIGINT
