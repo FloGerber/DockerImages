@@ -1,0 +1,5 @@
+FROM alpine:latest
+
+RUN apk add --no-cache pipx \
+    && pipx install --include-deps ansible \
+    && pipx inject ansible argcomplete 
