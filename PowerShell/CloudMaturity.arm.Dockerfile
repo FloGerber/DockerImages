@@ -31,13 +31,12 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && rm -rf /var/lib/apt/lists/*
 SHELL [ "pwsh", "-command" ]
 
-ARG REPOSITORY=PSGallery
-
-RUN Set-PSRepository -Name ${REPOSITORY} -InstallationPolicy Trusted \
+RUN Set-PSRepository -Name PSGallery -InstallationPolicy Trusted; \
     Install-Module -Name Az -Force -Scope AllUsers; \
     Install-Module -Name Microsoft.Graph -Force -Scope AllUsers; \
     Install-Module -Name PSWritePDF -Force -Scope AllUsers; \
-    Set-PSRepository -Name ${REPOSITORY} -InstallationPolicy Untrusted ; \
+    Install-Module -Name PSWriteHTML -Force -Scope AllUsers; \
+    Set-PSRepository -Name PSGallery -InstallationPolicy Untrusted ; \
     New-Item -Path $profile -type file -force
 
 CMD [ "pwsh" ]
